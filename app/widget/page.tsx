@@ -1,165 +1,180 @@
-
 "use client";
 
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
-import { marked } from "marked";
+import { Marked, type Tokens } from "marked";
+import type { Msg } from "@/types/chat";
 
-type Msg = { role: "user" | "assistant"; content: string };
-
-marked.setOptions({
-    gfm: true,
-    breaks: true,
-    async: false,
-});
-
-marked.use({
-  renderer: {
-    heading(text, level) {
-      return `<h${level}>${text}</h${level}>`;
+// ── Marked v15: create a configured instance (sync), and customize renderer
+const md = new Marked({ gfm: true, breaks: true, async: false });
+md.use({
+    renderer: {
+        // v15 signature: receives a token, not (text, level)
+        heading(this: unknown, token: Tokens.Heading): string | false {
+            return `<h${token.depth}>${token.text}</h${token.depth}>`;
+        },
     },
-  },
 });
+
+// ── Helpers
+function renderContent(text: string): { __html: string } {
+    const html = md.parse(text) as string; // async:false narrows to string at runtime; cast for TS
+    return { __html: DOMPurify.sanitize(html) };
+}
 
 export default function Widget() {
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [state, setState] = useState<any>({ step: "intro", fit_score: 0 });
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
-  const scroller = useRef<HTMLDivElement>(null);
+    // State
+    const [messages, setMessages] = useState<Msg[]>([]);
+    const [state, setState] = useState<any>({ step: "intro", fit_score: 0 });
+    const [input, setInput] = useState("");
+    const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    if (messages.length === 0) {
-      (async () => {
+    // Refs
+    const scroller = useRef<HTMLDivElement | null>(null);
+    const inputRef = useRef<HTMLInputElement | null>(null);
+
+    // ── Reusable message appenders (type-safe)
+    function appendUserMessage(text: string): Msg[] {
+        const msg: Msg = { role: "user", content: text };
+        const next: Msg[] = [...messages, msg];
+        setMessages(next);
+        return next;
+    }
+
+    function appendAssistantMessage(text: string): Msg[] {
+        const msg: Msg = { role: "assistant", content: text };
+        const next: Msg[] = [...messages, msg];
+        setMessages(next);
+        return next;
+    }
+
+    // ── API call
+    async function callApi(nextMessages: Msg[]) {
+        setBusy(true);
         try {
-          const res = await fetch("/api/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ messages: [] }),
-            cache: "no-store",
-          });
-          if (!res.ok) throw new Error(`HTTP ${res.status}`);
-          const data = await res.json();
-          setMessages([{ role: "assistant", content: data.text }]);
-          setState(data.state);
+            const res = await fetch("/api/chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                cache: "no-store",
+                body: JSON.stringify({
+                    messages: nextMessages,
+                    vars: {
+                        APP_NAME: "ExecFrontline",
+                        LINKS: {
+                            tour: "https://typebot.co/execfrontline-validation",
+                            apply: "https://typebot.co/execfrontline-validation",
+                            calendly:
+                                "https://calendly.com/nic-execfrontline/1-1-introduction-to-execfrontline",
+                            newsletter:
+                                "https://www.execfrontline.com/execfrontline-newsletter/",
+                            website: "https://execfrontline.com",
+                        },
+                        COPY: {
+                            fit_yes:
+                                "Perfect — that’s exactly the kind of profile ExecFrontline was built for. You’ll fit right in.",
+                        },
+                    },
+                }),
+            });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+            const data = await res.json();
+            appendAssistantMessage(data.text);
+            setState(data.state);
+            scroller.current?.scrollTo(0, scroller.current.scrollHeight);
         } catch (err) {
-          console.error("Init call failed:", err);
+            console.error("Send failed:", err);
+        } finally {
+            setBusy(false);
         }
-      })();
     }
-  }, [messages.length]);
 
-  function renderContent(text: string) {
-    const html = marked.parse(text);
-    return { __html: DOMPurify.sanitize(html) };
-  }
-
-  async function callApi(nextMessages: Msg[]) {
-    setBusy(true);
-    try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: nextMessages,
-          vars: {
-            APP_NAME: "ExecFrontline",
-            LINKS: {
-              tour: "https://typebot.co/execfrontline-validation",
-              apply: "https://typebot.co/execfrontline-validation",
-              calendly: "https://calendly.com/nic-execfrontline/1-1-introduction-to-execfrontline",
-              newsletter: "https://www.execfrontline.com/execfrontline-newsletter/",
-              website: "https://execfrontline.com",
-            },
-            COPY: {
-              fit_yes: "Perfect — that’s exactly the kind of profile ExecFrontline was built for. You’ll fit right in.",
-            },
-          },
-        }),
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await res.json();
-      setMessages((m) => [...m, { role: "assistant", content: data.text }]);
-      setState(data.state);
-      scroller.current?.scrollTo(0, scroller.current.scrollHeight);
-    } catch (err) {
-      console.error("Send failed:", err);
-    } finally {
-      setBusy(false);
+    // ── Handlers
+    async function send() {
+        if (!input.trim() || busy) return;
+        const next = appendUserMessage(input);
+        setInput("");
+        await callApi(next);
     }
-  }
 
-  async function send() {
-    if (!input.trim() || busy) return;
-    const next = [...messages, { role: "user", content: input }];
-    setMessages(next);
-    setInput("");
-    await callApi(next);
-  }
+    async function chooseApply() {
+        if (busy) return;
+        const next = appendUserMessage("I want to apply as a Founding Member.");
+        await callApi(next);
+    }
 
-  async function chooseApply() {
-    if (busy) return;
-    const choice = "I want to apply as a Founding Member.";
-    const next = [...messages, { role: "user", content: choice }];
-    setMessages(next);
-    await callApi(next);
-  }
-  async function chooseTour() {
-    if (busy) return;
-    const choice = "I want to take the 2-minute tour first.";
-    const next = [...messages, { role: "user", content: choice }];
-    setMessages(next);
-    await callApi(next);
-  }
-  async function chooseUpdates() {
-    if (busy) return;
-    const choice = "I only want occasional updates by email.";
-    const next = [...messages, { role: "user", content: choice }];
-    setMessages(next);
-    await callApi(next);
-  }
+    async function chooseTour() {
+        if (busy) return;
+        const next = appendUserMessage("Give me the tour.");
+        await callApi(next);
+    }
 
-  const showFitCtas = state?.step === "fit" || (state?.fit_score ?? 0) >= 0.7;
-  const showTourCtas = state?.step === "tour";
-  const showUpdatesCtas = state?.step === "updates";
+    // UX niceties
+    useEffect(() => {
+        inputRef.current?.focus();
+    }, []);
 
-  return (
-    <div style={{ fontFamily: "system-ui", height: "100vh", display: "flex", flexDirection: "column" }}>
-      <div ref={scroller} style={{ flex: 1, overflow: "auto", padding: 12 }}>
-        {messages.map((m, i) => (
-          <div key={i} style={{ margin: "8px 0" }}>
-            <strong>{m.role === "user" ? "You" : "ExecFrontline"}</strong>
-            <div className="message-content" style={{ marginTop: 4 }} dangerouslySetInnerHTML={renderContent(m.content)} />
-          </div>
-        ))}
+    // ── Render
+    return (
+        <div className="ef-widget">
+            <div
+                ref={scroller}
+                className="ef-thread"
+                style={{ overflowY: "auto", maxHeight: 540, padding: 12 }}
+            >
+                {messages.map((m, i) => (
+                    <div
+                        key={i}
+                        className={`ef-msg ${m.role}`}
+                        style={{
+                            margin: "8px 0",
+                            padding: "10px 12px",
+                            borderRadius: 10,
+                            background: m.role === "user" ? "#eef5ff" : "#f6f7f9",
+                        }}
+                        dangerouslySetInnerHTML={renderContent(m.content)}
+                    />
+                ))}
+            </div>
 
-        {(showFitCtas || showTourCtas || showUpdatesCtas) && (
-          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={chooseApply} disabled={busy} style={btn} aria-label="Apply as a Founding Member">✈️ Apply</button>
-            <button onClick={chooseTour} disabled={busy} style={btnSecondary} aria-label="Take the 2-minute tour">🧭 Take tour</button>
-            <button onClick={chooseUpdates} disabled={busy} style={btnTertiary} aria-label="Receive occasional updates only">📧 Updates only</button>
-          </div>
-        )}
+            <div
+                className="ef-actions"
+                style={{ display: "flex", gap: 8, marginTop: 10 }}
+            >
+                <input
+                    ref={inputRef}
+                    value={input}
+                    onChange={(e) => setInput(e.target.value)}
+                    placeholder={busy ? "Working…" : "Type your question…"}
+                    onKeyDown={(e) => {
+                        if (e.key === "Enter") void send();
+                    }}
+                    disabled={busy}
+                    style={{
+                        flex: 1,
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        border: "1px solid #d0d7de",
+                    }}
+                />
+                <button onClick={() => void send()} disabled={busy}>
+                    Send
+                </button>
+            </div>
 
-        <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-          <em>state:</em> {JSON.stringify(state)}
+            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                <button onClick={() => void chooseApply()} disabled={busy}>
+                    Apply (Founding Member)
+                </button>
+                <button onClick={() => void chooseTour()} disabled={busy}>
+                    Take the Tour
+                </button>
+            </div>
+
+            {/* Optional debug/state display */}
+            {/* <pre style={{ marginTop: 12 }}>{JSON.stringify(state, null, 2)}</pre> */}
         </div>
-      </div>
-
-      <div style={{ display: "flex", gap: 8, padding: 12, borderTop: "1px solid #eee" }}>
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about ExecFrontline or AA&D challenges…"
-          style={{ flex: 1, padding: 8 }}
-          onKeyDown={(e) => e.key === "Enter" && send()}
-          disabled={busy}
-        />
-        <button onClick={send} disabled={busy}>{busy ? "…" : "Send"}</button>
-      </div>
-    </div>
-  );
+    );
 }
 
 const btn: React.CSSProperties = {
