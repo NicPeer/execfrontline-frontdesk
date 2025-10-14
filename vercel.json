@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "name": "execfrontline-frontdesk-agent",
+  "builds": [{ "src": "package.json", "use": "@vercel/next" }],
+  "framework": "nextjs",
+  "regions": ["fra1"]
+}

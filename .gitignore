@@ -1,0 +1,11 @@
+node_modules/
+.next/
+dist/
+out/
+.turbo/
+coverage/
+.env
+.env.*
+.vscode/
+.DS_Store
+Thumbs.db
