@@ -154,14 +154,29 @@ export async function POST(req: NextRequest) {
         .replaceAll("{{LINKS.newsletter}}", vars.LINKS?.newsletter ?? process.env.LINK_NEWSLETTER ?? "https://www.execfrontline.com/execfrontline-newsletter/")
         .replaceAll("{{COPY.fit_yes}}", vars.COPY?.fit_yes ?? process.env.FIT_COPY_PERFECT ?? "Perfect — that’s exactly the kind of profile ExecFrontline was built for.");
 
-    // --- Chat Completions (stable path, no TS issues)
-    const resp = await client.chat.completions.create({
-        model: "gpt-4.1-mini",
-        messages: [{ role: "system", content: system }, ...messages],
-        temperature: 0.5,
-    });
+    // Call OpenAI (Responses preferred; fallback to Chat Completions)
+    let text = "";
 
-    const text = resp.choices?.[0]?.message?.content ?? "";
+    // Cast so TS doesn't complain on older openai SDKs
+    const anyClient = client as any;
+    const hasResponses = typeof anyClient?.responses?.create === "function";
+
+    if (hasResponses) {
+        const resp = await anyClient.responses.create({
+            model: "gpt-4.1-mini",
+            input: [{ role: "system", content: system }, ...messages],
+        });
+        text = (resp as any).output_text ?? "";
+    } else {
+        const resp = await client.chat.completions.create({
+            model: "gpt-4.1-mini",
+            messages: [{ role: "system", content: system }, ...messages],
+            temperature: 0.5,
+        });
+        text = resp.choices?.[0]?.message?.content ?? "";
+    }
+
+
 
     // Parse <state>{...}</state> header
     const match = text.match(/^<state>(\{.*\})<\/state>\n?/);

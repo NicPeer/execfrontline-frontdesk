@@ -33,6 +33,14 @@ export default function Widget() {
     const scroller = useRef<HTMLDivElement | null>(null);
     const inputRef = useRef<HTMLInputElement | null>(null);
 
+    useEffect(() => {
+        if (messages.length === 0 && !busy) {
+            void callApi([]); // 👈 triggers your backend to send the welcome message
+            // or: void callApi([{ role: "user", content: "__INIT__" } as Msg]);
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     // ── Reusable message appenders (type-safe)
     function appendUserMessage(text: string): Msg[] {
         const msg: Msg = { role: "user", content: text };
@@ -109,6 +117,17 @@ export default function Widget() {
         await callApi(next);
     }
 
+    async function chooseUpdates() {
+        if (busy) return;
+        const next = appendUserMessage("I only want occasional updates by email.");
+        await callApi(next);
+    }
+
+    // Show CTAs when they’re relevant
+    const showFitCtas = state?.step === "fit" || (state?.fit_score ?? 0) >= 0.7;
+    const showTourCtas = state?.step === "tour";
+    const showUpdatesCtas = state?.step === "updates";
+
     // UX niceties
     useEffect(() => {
         inputRef.current?.focus();
@@ -162,17 +181,44 @@ export default function Widget() {
                 </button>
             </div>
 
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                <button onClick={() => void chooseApply()} disabled={busy}>
-                    Apply (Founding Member)
-                </button>
-                <button onClick={() => void chooseTour()} disabled={busy}>
-                    Take the Tour
-                </button>
-            </div>
+            {(showFitCtas || showTourCtas || showUpdatesCtas) && (
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                        onClick={() => void chooseApply()}
+                        disabled={busy}
+                        style={btn}
+                        aria-label="Apply as a Founding Member"
+                    >
+                        ✈️ Apply
+                    </button>
+
+                    <button
+                        onClick={() => void chooseTour()}
+                        disabled={busy}
+                        style={btnSecondary}
+                        aria-label="Take the 2-minute tour"
+                    >
+                        🧭 Take tour
+                    </button>
+
+                    <button
+                        onClick={() => void chooseUpdates()}
+                        disabled={busy}
+                        style={btnTertiary}
+                        aria-label="Receive occasional updates only"
+                    >
+                        📧 Updates only
+                    </button>
+                </div>
+            )}
+
 
             {/* Optional debug/state display */}
             {/* <pre style={{ marginTop: 12 }}>{JSON.stringify(state, null, 2)}</pre> */}
+            <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
+                <em>state:</em> {JSON.stringify(state)}
+            </div>
+
         </div>
     );
 }
