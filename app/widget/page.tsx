@@ -212,13 +212,6 @@ export default function Widget() {
                 </div>
             )}
 
-
-            {/* Optional debug/state display */}
-            {/* <pre style={{ marginTop: 12 }}>{JSON.stringify(state, null, 2)}</pre> */}
-            <div style={{ fontSize: 12, color: "#666", marginTop: 8 }}>
-                <em>state:</em> {JSON.stringify(state)}
-            </div>
-
         </div>
     );
 }

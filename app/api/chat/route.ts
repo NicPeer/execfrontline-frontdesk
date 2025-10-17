@@ -5,8 +5,13 @@ export const runtime = "nodejs";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM = `ALWAYS PREPEND a JSON state header in this exact format before any visible text:
-<state>{"step":"intro|goals|fit|tour|apply|updates","fit_score":0..1,"role":"","industry":"","goals":[],"next":""}</state>
+const SYSTEM = `
+You are the ExecFrontline onboarding assistant.
+Before every visible message, prepend one hidden state header in JSON inside <state>...</state>, like:
+<state>{"step":"intro|goals|fit|tour|apply|updates","fit_score":0.8}</state>
+Then continue with your visible text response.
+Never show the <state> header to the user — it is for internal logic only.
+
 
 🎯 PURPOSE
 You are the fast-moving onboarding assistant for **ExecFrontline** — the private network where aerospace, aviation & defense (AA&D) leaders connect, learn, and grow together.  
@@ -154,10 +159,9 @@ export async function POST(req: NextRequest) {
         .replaceAll("{{LINKS.newsletter}}", vars.LINKS?.newsletter ?? process.env.LINK_NEWSLETTER ?? "https://www.execfrontline.com/execfrontline-newsletter/")
         .replaceAll("{{COPY.fit_yes}}", vars.COPY?.fit_yes ?? process.env.FIT_COPY_PERFECT ?? "Perfect — that’s exactly the kind of profile ExecFrontline was built for.");
 
-    // Call OpenAI (Responses preferred; fallback to Chat Completions)
+    // --- Call OpenAI (Responses preferred; fallback to Chat Completions) ---
     let text = "";
 
-    // Cast so TS doesn't complain on older openai SDKs
     const anyClient = client as any;
     const hasResponses = typeof anyClient?.responses?.create === "function";
 
@@ -176,15 +180,27 @@ export async function POST(req: NextRequest) {
         text = resp.choices?.[0]?.message?.content ?? "";
     }
 
+    // --- Parse and strip <state>{...}</state> header(s) ---
+    const stateRe = /<state>\s*({[\s\S]*?})\s*<\/state>/i;   // first occurrence
+    const stateReGlobal = /<state>[\s\S]*?<\/state>/gi;       // all occurrences for stripping
 
-
-    // Parse <state>{...}</state> header
-    const match = text.match(/^<state>(\{.*\})<\/state>\n?/);
     let state: any = { step: "intro", fit_score: 0 };
     let visible = text;
-    if (match) {
-        try { state = JSON.parse(match[1]); } catch { }
-        visible = text.replace(match[0], "");
+
+    const m = text.match(stateRe);
+    if (m && m[1]) {
+        try {
+            state = JSON.parse(m[1]);
+        } catch (e) {
+            console.warn("Failed to parse <state> JSON:", e, m[1]);
+        }
+    }
+
+    visible = text.replace(stateReGlobal, "").trim();
+
+    // --- Safeguard: if model returned nothing visible ---
+    if (!visible || visible.length === 0) {
+        visible = "Thanks for your message — how can I help you get oriented?";
     }
 
     return NextResponse.json({ text: visible, state });
